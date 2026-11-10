@@ -1,0 +1,7 @@
+# macOS
+.DS_Store
+
+# Go build output
+/backend/server
+*.test
+*.out
