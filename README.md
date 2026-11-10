@@ -178,6 +178,7 @@ backend/
   cmd/server/main.go         HTTP server: PORT config, timeouts, graceful shutdown
   internal/api/              HTTP layer: routing, JSON decoding, error responses
   internal/triage/           Domain: Vitals validation and NEWS2 scoring (no HTTP)
+mobile/                      Expo SDK 58 app: vitals form and result screen (see mobile/README.md)
 docs/PROJECT.MD              Project plan and scope
 ```
 
@@ -185,7 +186,7 @@ docs/PROJECT.MD              Project plan and scope
 
 - [x] Go API skeleton and input validation
 - [x] NEWS2 Scale 1 scoring
-- [ ] React Native / Expo mobile client
+- [x] React Native / Expo mobile client ([setup and networking](mobile/README.md))
 - [ ] Hardening
 - [ ] Deployment
 
