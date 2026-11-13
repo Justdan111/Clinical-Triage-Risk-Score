@@ -1,9 +1,9 @@
 import { StyleSheet, Text, View } from 'react-native';
 
 export const DISCLAIMER_TEXT =
-  'Portfolio demo only. This is not a medical device and has not been validated for clinical use. Do not use it to make decisions about real patients.';
+  'Portfolio demo. Not a medical device and not validated for clinical use. Do not use it for real patients.';
 
-/** Always-visible disclaimer banner, rendered at the top of every screen. */
+/** Always-visible disclaimer banner, rendered on every screen (never behind a menu). */
 export function Disclaimer() {
   return (
     <View style={styles.box} accessibilityRole="alert">
