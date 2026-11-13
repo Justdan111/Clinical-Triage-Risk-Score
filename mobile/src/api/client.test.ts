@@ -118,6 +118,15 @@ describe('non-JSON or unreadable responses', () => {
     }
   });
 
+  it.each([
+    [404, '{"error":"not found","code":"not_found"}'],
+    [405, '{"error":"method not allowed","code":"method_not_allowed"}'],
+  ])('a JSON routing error (HTTP %d) is unexpected: the URL is wrong', async (status, body) => {
+    const outcome = await scoreWith(status, body);
+    expect(outcome.kind).toBe('unexpected');
+    if (outcome.kind === 'unexpected') expect(outcome.message).toContain('EXPO_PUBLIC_API_URL');
+  });
+
   it('a JSON error body of the wrong shape is unexpected', async () => {
     expect((await scoreWith(400, '{"message":"nope"}')).kind).toBe('unexpected');
   });

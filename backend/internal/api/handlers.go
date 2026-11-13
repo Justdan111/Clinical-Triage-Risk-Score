@@ -6,11 +6,9 @@ package api
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"mime"
 	"net/http"
-	"reflect"
 
 	"clinicaltriage/backend/internal/triage"
 )
@@ -27,6 +25,8 @@ const (
 	CodeValidationFailed     = "validation_failed"
 	CodeBodyTooLarge         = "body_too_large"
 	CodeUnsupportedMediaType = "unsupported_media_type"
+	CodeNotFound             = "not_found"
+	CodeMethodNotAllowed     = "method_not_allowed"
 	CodeInternal             = "internal"
 )
 
@@ -45,7 +45,7 @@ func NewRouter(logger *slog.Logger) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", h.health)
 	mux.HandleFunc("POST /score", h.score)
-	return mux
+	return h.jsonRoutingErrors(mux)
 }
 
 // handlers holds the dependencies the handler functions share.
@@ -53,13 +53,56 @@ type handlers struct {
 	logger *slog.Logger
 }
 
+// jsonRoutingErrors makes the mux's own 404 and 405 answers use the same JSON
+// ErrorResponse as every other error. ServeMux.Handler documents that it
+// returns an empty pattern when no route applies; in that case we run the
+// mux's handler against a probe to learn its status (404 or 405) and Allow
+// header, then answer in JSON ourselves.
+func (h *handlers) jsonRoutingErrors(mux *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handler, pattern := mux.Handler(r)
+		if pattern != "" {
+			mux.ServeHTTP(w, r)
+			return
+		}
+
+		probe := &statusProbe{header: http.Header{}}
+		handler.ServeHTTP(probe, r)
+
+		switch probe.status {
+		case http.StatusMethodNotAllowed:
+			if allow := probe.header.Get("Allow"); allow != "" {
+				w.Header().Set("Allow", allow)
+			}
+			h.writeError(w, http.StatusMethodNotAllowed, ErrorResponse{
+				Error: "method not allowed", Code: CodeMethodNotAllowed,
+			})
+		case http.StatusNotFound:
+			h.writeError(w, http.StatusNotFound, ErrorResponse{Error: "not found", Code: CodeNotFound})
+		default:
+			// e.g. a redirect for an unclean path: pass it through unchanged.
+			mux.ServeHTTP(w, r)
+		}
+	})
+}
+
+// statusProbe is a ResponseWriter that only records the status and headers.
+type statusProbe struct {
+	header http.Header
+	status int
+}
+
+func (p *statusProbe) Header() http.Header         { return p.header }
+func (p *statusProbe) Write(b []byte) (int, error) { return len(b), nil }
+func (p *statusProbe) WriteHeader(status int)      { p.status = status }
+
 // health reports that the process is up and serving requests.
 func (h *handlers) health(w http.ResponseWriter, r *http.Request) {
 	h.writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
 // score decodes a Vitals body and returns its NEWS2 Result (200), or a 4xx
-// ErrorResponse naming what was wrong with the request.
+// ErrorResponse naming everything that was wrong with the request.
 func (h *handlers) score(w http.ResponseWriter, r *http.Request) {
 	if ct := r.Header.Get("Content-Type"); ct != "" {
 		mediaType, _, err := mime.ParseMediaType(ct)
@@ -74,31 +117,37 @@ func (h *handlers) score(w http.ResponseWriter, r *http.Request) {
 
 	r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
 
-	var v triage.Vitals
-	if status, resp, ok := decodeJSON(r.Body, &v); !ok {
-		h.logger.Info("score request rejected", "code", resp.Code, "status", status)
-		h.writeError(w, status, resp)
+	fields, problems, reqErr := readObject(r.Body)
+	if reqErr != nil {
+		h.logger.Info("score request rejected", "code", reqErr.resp.Code, "status", reqErr.status)
+		h.writeError(w, reqErr.status, reqErr.resp)
 		return
 	}
+	v := vitalsFrom(fields, problems)
 
 	// Score validates before scoring, so there is one call and no way to score
 	// unvalidated input.
 	res, err := triage.Score(v)
-	if err != nil {
-		var ve *triage.ValidationError
-		if !errors.As(err, &ve) {
-			// Score only fails with *ValidationError; anything else is a bug.
-			h.logger.Error("unexpected validation error", "err", err)
-			h.writeError(w, http.StatusInternalServerError, ErrorResponse{
-				Error: "internal error", Code: CodeInternal,
-			})
-			return
+	if err != nil || len(problems) > 0 {
+		var validation []triage.FieldError
+		if err != nil {
+			var ve *triage.ValidationError
+			if !errors.As(err, &ve) {
+				// Score only fails with *ValidationError; anything else is a bug.
+				h.logger.Error("unexpected validation error", "err", err)
+				h.writeError(w, http.StatusInternalServerError, ErrorResponse{
+					Error: "internal error", Code: CodeInternal,
+				})
+				return
+			}
+			validation = ve.Errors
 		}
-		h.logger.Info("score request rejected", "code", CodeValidationFailed, "fields", len(ve.Errors))
+		fieldErrs := mergeProblems(validation, problems)
+		h.logger.Info("score request rejected", "code", CodeValidationFailed, "fields", len(fieldErrs))
 		h.writeError(w, http.StatusBadRequest, ErrorResponse{
 			Error:  "one or more vitals are missing or invalid",
 			Code:   CodeValidationFailed,
-			Fields: ve.Errors,
+			Fields: fieldErrs,
 		})
 		return
 	}
@@ -106,81 +155,6 @@ func (h *handlers) score(w http.ResponseWriter, r *http.Request) {
 	// Log the outcome, never the vitals themselves (patient data).
 	h.logger.Info("scored", "band", res.Band, "total", res.Total)
 	h.writeJSON(w, http.StatusOK, res)
-}
-
-// decodeJSON reads exactly one JSON object from body into dst. On failure it
-// returns the HTTP status and error body to send, and ok == false.
-//
-// It inspects error *types* (never error text), because the wording of
-// encoding/json errors is not stable across Go versions.
-func decodeJSON(body io.Reader, dst any) (status int, resp ErrorResponse, ok bool) {
-	dec := json.NewDecoder(body)
-	err := dec.Decode(dst)
-	if err == nil {
-		// Reject trailing data such as `{...}{...}` or `{...} junk`.
-		if dec.Decode(&struct{}{}) != io.EOF {
-			return http.StatusBadRequest, ErrorResponse{
-				Error: "request body must contain a single JSON object",
-				Code:  CodeInvalidJSON,
-			}, false
-		}
-		return 0, ErrorResponse{}, true
-	}
-
-	var maxErr *http.MaxBytesError
-	var typeErr *json.UnmarshalTypeError
-	switch {
-	case errors.As(err, &maxErr):
-		return http.StatusRequestEntityTooLarge, ErrorResponse{
-			Error: "request body is too large",
-			Code:  CodeBodyTooLarge,
-		}, false
-	case errors.Is(err, io.EOF):
-		return http.StatusBadRequest, ErrorResponse{
-			Error: "request body is empty",
-			Code:  CodeInvalidJSON,
-		}, false
-	case errors.As(err, &typeErr) && typeErr.Field != "":
-		// e.g. {"pulse": "fast"}: the JSON is well-formed but a value has the
-		// wrong type. typeErr.Field is the JSON name, so we can report it.
-		return http.StatusBadRequest, ErrorResponse{
-			Error: "one or more vitals have the wrong type",
-			Code:  CodeValidationFailed,
-			Fields: []triage.FieldError{{
-				Field:   typeErr.Field,
-				Message: "has the wrong type; expected " + describeType(typeErr.Type),
-			}},
-		}, false
-	default:
-		// Syntax errors, a top-level value that is not an object, etc.
-		return http.StatusBadRequest, ErrorResponse{
-			Error: "request body is not valid JSON",
-			Code:  CodeInvalidJSON,
-		}, false
-	}
-}
-
-// describeType names a Go type in API terms, so clients see "a whole number"
-// rather than Go type names like "triage.Consciousness". Pointers (our
-// optional fields) are unwrapped to the type they point to.
-func describeType(t reflect.Type) string {
-	for t != nil && t.Kind() == reflect.Pointer {
-		t = t.Elem()
-	}
-	if t == nil {
-		return "a different type"
-	}
-	switch t.Kind() {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return "a whole number"
-	case reflect.Float32, reflect.Float64:
-		return "a number"
-	case reflect.Bool:
-		return "true or false"
-	case reflect.String:
-		return "a string"
-	}
-	return "a different type"
 }
 
 // writeError writes an ErrorResponse with the given status.
