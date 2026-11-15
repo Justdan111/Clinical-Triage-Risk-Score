@@ -12,8 +12,8 @@ export type ScoreOutcome =
   | { kind: 'timeout'; message: string }
   /** A JSON error from the backend without field errors (invalid_json, 413, 415, 500). */
   | { kind: 'server'; status: number; message: string }
-  /** A response we can't interpret: a non-JSON error body (the backend's plain-text
-   *  404/405) or a 200 whose body isn't a valid ScoreResult. */
+  /** A response that means "wrong server": a non-JSON error body, a 404/405,
+   *  or a 200 whose body isn't a valid ScoreResult. */
   | { kind: 'unexpected'; status: number; message: string }
   /** EXPO_PUBLIC_API_URL is not set. */
   | { kind: 'config'; message: string };
@@ -80,8 +80,10 @@ export function createScoreClient({ baseUrl, timeoutMs = DEFAULT_TIMEOUT_MS, fet
     }
 
     const err = parseErrorResponse(body);
-    if (err === null) {
-      // e.g. Go's ServeMux plain-text "404 page not found" or "Method Not Allowed".
+    // A non-JSON body (a proxy page, or an older backend's plain-text 404/405)
+    // or a JSON 404/405 from this backend all mean the app is pointing at the
+    // wrong address, not that the vitals were wrong.
+    if (err === null || err.code === 'not_found' || err.code === 'method_not_allowed') {
       return {
         kind: 'unexpected',
         status,

@@ -54,7 +54,9 @@ export function formatDriverValue(parameter: string, value: number | string | bo
 
 export interface BandInfo {
   label: string;
-  /** A glyph shown beside the label so colour is never the only signal. */
+  /** A glyph shown beside the label so colour is never the only signal. Ends in
+   *  U+FE0E (text presentation): without it iOS draws some glyphs, e.g. â¼, as
+   *  colour emoji that ignore the text colour (a red emoji on the red card). */
   icon: string;
   /** Spoken by screen readers instead of the glyph. */
   iconDescription: string;
@@ -69,7 +71,7 @@ export interface BandInfo {
 export const BAND_INFO: Record<Band, BandInfo> = {
   low: {
     label: 'Low',
-    icon: '✓',
+    icon: '✓\uFE0E',
     iconDescription: 'check mark',
     background: '#1B5E20',
     foreground: '#FFFFFF',
@@ -77,7 +79,7 @@ export const BAND_INFO: Record<Band, BandInfo> = {
   },
   red_flagged: {
     label: 'Red-flagged',
-    icon: '⚑',
+    icon: '⚑\uFE0E',
     iconDescription: 'flag',
     background: '#FFD54F',
     foreground: '#1A1A1A',
@@ -85,7 +87,7 @@ export const BAND_INFO: Record<Band, BandInfo> = {
   },
   medium: {
     label: 'Medium',
-    icon: '▲',
+    icon: '▲\uFE0E',
     iconDescription: 'warning triangle',
     background: '#FB8C00',
     foreground: '#1A1A1A',
@@ -93,7 +95,7 @@ export const BAND_INFO: Record<Band, BandInfo> = {
   },
   high: {
     label: 'High',
-    icon: '‼',
+    icon: '‼\uFE0E',
     iconDescription: 'double exclamation mark',
     background: '#B71C1C',
     foreground: '#FFFFFF',

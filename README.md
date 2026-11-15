@@ -131,13 +131,15 @@ the human-readable `error` text, which may change.
 
 | Status | `code` | Cause |
 |---|---|---|
-| 400 | `validation_failed` | Missing field, out-of-range value, or wrong type (`fields` names each one) |
-| 400 | `invalid_json` | Malformed or empty body, or extra data after the JSON object |
+| 400 | `validation_failed` | Missing, `null`, out-of-range, wrong-type or duplicated field. `fields` names **every** problem in one response. |
+| 400 | `invalid_json` | Empty or malformed body, a top-level value that isn't an object (`null`, an array), or extra data after the object |
+| 404 | `not_found` | Unknown path |
+| 405 | `method_not_allowed` | Wrong HTTP method (the `Allow` header lists the right ones) |
 | 413 | `body_too_large` | Body over 4 KiB |
 | 415 | `unsupported_media_type` | `Content-Type` is not `application/json` |
 
-A wrong HTTP method returns `405` and an unknown path returns `404`. Both come from Go's
-router and are plain text, not JSON.
+Unknown fields are ignored. A misspelled field still fails, because the real field is then
+reported as missing.
 
 ## Running locally
 

@@ -12,6 +12,11 @@ function readResult(param: string | string[] | undefined): ScoreResult | null {
   return typeof param === 'string' ? parseScoreResult(tryParseJSON(param)) : null;
 }
 
+// The band label is already 36pt. At the largest accessibility text size an
+// uncapped "Red-flagged" would be wider than the screen; 1.5x keeps it huge
+// but on one line. All other text scales fully.
+const BAND_TEXT_MAX_SCALE = 1.5;
+
 function goBack() {
   if (router.canGoBack()) router.back();
   else router.replace('/');
@@ -23,9 +28,19 @@ export default function ResultScreen() {
 
   return (
     <ScrollView contentContainerStyle={styles.container} contentInsetAdjustmentBehavior="automatic">
-      <Disclaimer />
-      {result ? <ResultView result={result} /> : <Text style={styles.body}>This result could not be displayed.</Text>}
-      <Pressable onPress={goBack} accessibilityRole="button" style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}>
+      {result ? (
+        <ResultView result={result} />
+      ) : (
+        <>
+          <Disclaimer />
+          <Text style={styles.body}>This result could not be displayed.</Text>
+        </>
+      )}
+      <Pressable
+        onPress={goBack}
+        accessibilityRole="button"
+        accessibilityLabel="Back to the vitals form"
+        style={({ pressed }) => [styles.button, pressed && styles.buttonPressed]}>
         <Text style={styles.buttonText}>Back to vitals</Text>
       </Pressable>
     </ScrollView>
@@ -42,8 +57,8 @@ function ResultView({ result }: { result: ScoreResult }) {
         accessibilityLabel={`Band: ${band.label}. ${band.rcpRisk}. NEWS2 total ${result.total}.`}
       >
         <View style={styles.bandRow}>
-          <Text style={[styles.bandIcon, { color: band.foreground }]}>{band.icon}</Text>
-          <Text style={[styles.bandLabel, { color: band.foreground }]}>{band.label}</Text>
+          <Text style={[styles.bandIcon, { color: band.foreground }]} maxFontSizeMultiplier={BAND_TEXT_MAX_SCALE}>{band.icon}</Text>
+          <Text style={[styles.bandLabel, { color: band.foreground }]} maxFontSizeMultiplier={BAND_TEXT_MAX_SCALE}>{band.label}</Text>
         </View>
         <Text style={[styles.bandRisk, { color: band.foreground }]}>{band.rcpRisk}</Text>
         <Text style={[styles.total, { color: band.foreground }]}>NEWS2 total: {result.total}</Text>
@@ -52,7 +67,13 @@ function ResultView({ result }: { result: ScoreResult }) {
       {result.band === 'red_flagged' ? <Text style={styles.explanation}>{RED_FLAG_EXPLANATION}</Text> : null}
       {result.note ? <Text style={styles.note}>Note: {result.note}</Text> : null}
 
-      <Text style={styles.heading}>What drove this score</Text>
+      {/* Straight after the band, before the details: at the largest text size
+          the disclaimer alone fills a screen, and the band must come first. */}
+      <Disclaimer />
+
+      <Text style={styles.heading} accessibilityRole="header">
+        What drove this score
+      </Text>
       {result.drivers.length === 0 ? (
         <Text style={styles.body}>No vital sign scored above zero.</Text>
       ) : (
@@ -80,9 +101,9 @@ function ResultView({ result }: { result: ScoreResult }) {
 const styles = StyleSheet.create({
   container: { padding: 16, gap: 16, paddingBottom: 48, backgroundColor: '#FFFFFF', flexGrow: 1 },
   bandCard: { borderRadius: 12, padding: 20, gap: 4 },
-  bandRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bandRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', columnGap: 12 },
   bandIcon: { fontSize: 36, fontWeight: '700' },
-  bandLabel: { fontSize: 36, fontWeight: '800' },
+  bandLabel: { fontSize: 36, fontWeight: '800', flexShrink: 1 },
   bandRisk: { fontSize: 16, fontWeight: '500' },
   total: { fontSize: 20, fontWeight: '700', marginTop: 4 },
   explanation: { fontSize: 16, lineHeight: 22, color: '#1A1A1A', fontWeight: '500' },

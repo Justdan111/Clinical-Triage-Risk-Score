@@ -76,6 +76,10 @@ describe('BAND_INFO', () => {
     expect(new Set(icons).size).toBe(BANDS.length);
   });
 
+  it.each(BANDS)('%s icon forces text presentation, so it takes the text colour', (band) => {
+    expect(BAND_INFO[band].icon.endsWith('\uFE0E')).toBe(true);
+  });
+
   it.each(BANDS)('%s text meets WCAG AA contrast (4.5:1)', (band) => {
     const { foreground, background } = BAND_INFO[band];
     expect(contrast(foreground, background)).toBeGreaterThanOrEqual(4.5);

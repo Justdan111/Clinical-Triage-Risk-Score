@@ -58,7 +58,7 @@ outcomes, and each one gets its own message on screen:
 | `network` | No response (server down, wrong address, no Wi-Fi) | "Can't reach the server at …" |
 | `timeout` | No complete response within 10 s (aborted via `AbortController`) | "The server didn't respond within 10 seconds" |
 | `server` | A JSON error without fields (400 `invalid_json`, 413, 415, 500) | The server's message |
-| `unexpected` | A non-JSON body (the backend's plain-text 404/405), or a 200 that isn't a valid result | "Unexpected response from the server (HTTP …)" |
+| `unexpected` | A 404/405, a non-JSON body (e.g. a proxy page), or a 200 that isn't a valid result: all mean the URL points at the wrong server | "Unexpected response from the server (HTTP …)" |
 | `config` | `EXPO_PUBLIC_API_URL` not set | How to set it |
 
 The server is the source of truth for validation. The app only checks for empty fields,
@@ -69,13 +69,23 @@ matching input.
 ## Scripts
 
 ```sh
-npx tsc --noEmit    # typecheck (strict, no `any`)
+npm run typecheck   # tsc for the app (strict, no `any`) and for e2e/ (adds Node types)
 npx expo lint       # ESLint with eslint-config-expo
 npm test            # Jest (jest-expo): API client, response parsing, labels, form
+npm run e2e         # needs a running backend; see below
 ```
 
 `jest.watchman` is set to `false` in `package.json`. A broken Watchman install can make
 Jest exit 0 **without running any tests**; Jest doesn't need Watchman outside watch mode.
+`.expo/` (Expo's cache folder) is excluded from test discovery.
+
+### End-to-end check
+
+`npm run e2e` sends the four example patients (Low, Red-flagged, Medium, High) through the
+app's real API client to a running backend, and asserts each band, total and driver list,
+plus one validation error. Start the API first (`cd backend && go run ./cmd/server`). Set
+`E2E_API_URL` to test a different server, such as the deployed one. If no server answers
+`/health`, it fails straight away with a clear message.
 
 ## Structure
 
@@ -89,5 +99,7 @@ src/
   api/client.ts        POST /score with timeout and typed outcomes
   triage/form.ts       Form values to request, with light client checks
   triage/labels.ts     Readable names, units, band colours and icons
+  hooks/use-keyboard-height.ts  Lifts the submit footer above the keyboard
   components/disclaimer.tsx
+e2e/score.e2e.ts       End-to-end check against a running backend
 ```
