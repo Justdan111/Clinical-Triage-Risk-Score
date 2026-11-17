@@ -55,19 +55,6 @@ describe('formatDriverValue', () => {
   });
 });
 
-// WCAG relative luminance and contrast ratio.
-function luminance(hex: string): number {
-  const [r, g, b] = [1, 3, 5].map((i) => {
-    const c = parseInt(hex.slice(i, i + 2), 16) / 255;
-    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
-  });
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
-  return (hi + 0.05) / (lo + 0.05);
-}
-
 describe('BAND_INFO', () => {
   it('gives every band a distinct label and icon, so colour is never the only signal', () => {
     const labels = BANDS.map((b) => BAND_INFO[b].label);
@@ -76,12 +63,10 @@ describe('BAND_INFO', () => {
     expect(new Set(icons).size).toBe(BANDS.length);
   });
 
-  it.each(BANDS)('%s icon forces text presentation, so it takes the text colour', (band) => {
-    expect(BAND_INFO[band].icon.endsWith('\uFE0E')).toBe(true);
-  });
-
-  it.each(BANDS)('%s text meets WCAG AA contrast (4.5:1)', (band) => {
-    const { foreground, background } = BAND_INFO[band];
-    expect(contrast(foreground, background)).toBeGreaterThanOrEqual(4.5);
+  it.each(BANDS)('%s has wording for screen readers and the RCP risk line', (band) => {
+    expect(BAND_INFO[band].iconDescription).toBeTruthy();
+    expect(BAND_INFO[band].rcpRisk).toBeTruthy();
   });
 });
+
+// Band colours and their contrast (both themes) are tested in src/theme/contrast.test.ts.

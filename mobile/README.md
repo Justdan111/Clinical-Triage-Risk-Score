@@ -87,11 +87,17 @@ plus one validation error. Start the API first (`cd backend && go run ./cmd/serv
 `E2E_API_URL` to test a different server, such as the deployed one. If no server answers
 `/health`, it fails straight away with a clear message.
 
+## Design
+
+The visual system (tokens for both themes, type scale, motion and the haptics rules) is in
+[DESIGN.md](DESIGN.md). Every colour comes from `src/theme/tokens.ts`, and
+`src/theme/contrast.test.ts` checks every text/background pair in both themes.
+
 ## Structure
 
 ```
 src/
-  app/_layout.tsx      Expo Router stack (two screens)
+  app/_layout.tsx      Fonts, theme, gesture root, Expo Router stack
   app/index.tsx        Vitals form
   app/result.tsx       Result: band, total, drivers
   api/types.ts         TypeScript mirror of the Go JSON contract
@@ -100,6 +106,9 @@ src/
   triage/form.ts       Form values to request, with light client checks
   triage/labels.ts     Readable names, units, band colours and icons
   hooks/use-keyboard-height.ts  Lifts the submit footer above the keyboard
+  theme/               Tokens (light + dark), band theme, contrast maths, themed Txt
+  motion/              Easing/count-up maths, haptics, reveal timeline, field feedback
+  components/          Cards, chips, toggle, progress ring, submit button, result pieces, icons
   components/disclaimer.tsx
 e2e/score.e2e.ts       End-to-end check against a running backend
 ```

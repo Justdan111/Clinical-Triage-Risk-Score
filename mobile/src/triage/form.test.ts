@@ -26,7 +26,7 @@ describe('buildRequest', () => {
     });
   });
 
-  it('flags every empty field and an unchosen consciousness level', () => {
+  it('flags every empty field and both unanswered choices', () => {
     expect(buildRequest(EMPTY_FORM)).toEqual({
       ok: false,
       errors: {
@@ -36,6 +36,7 @@ describe('buildRequest', () => {
         pulse: 'Required',
         temperature: 'Required',
         consciousness: 'Choose a level',
+        on_supplemental_oxygen: 'Choose air or supplemental oxygen',
       },
     });
   });
