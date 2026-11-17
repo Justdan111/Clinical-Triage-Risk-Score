@@ -1,27 +1,43 @@
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, View } from 'react-native';
+
+import { Txt, useTheme } from '@/theme/theme';
+import { radius, spacing } from '@/theme/tokens';
+
+import { Icon } from './icons';
 
 export const DISCLAIMER_TEXT =
   'Portfolio demo. Not a medical device and not validated for clinical use. Do not use it for real patients.';
 
-/** Always-visible disclaimer banner, rendered on every screen (never behind a menu). */
+/** Always-visible disclaimer card, rendered on every screen (never behind a menu). */
 export function Disclaimer() {
+  const { colors } = useTheme();
   return (
-    <View style={styles.box} accessibilityRole="alert">
-      <Text style={styles.title}>Not for clinical use</Text>
-      <Text style={styles.body}>{DISCLAIMER_TEXT}</Text>
+    <View
+      style={[styles.box, { backgroundColor: colors.warnSurface, borderColor: `${colors.onWarnSurface}40` }]}
+      accessible
+      accessibilityLabel={`Not for clinical use. ${DISCLAIMER_TEXT}`}
+    >
+      <Icon name="info" size={20} color={colors.onWarnSurface} />
+      <View style={styles.text}>
+        <Txt variant="label" color="onWarnSurface">
+          Not for clinical use
+        </Txt>
+        <Txt variant="caption" color="onWarnSurface">
+          {DISCLAIMER_TEXT}
+        </Txt>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   box: {
-    backgroundColor: '#FFF4E5',
-    borderColor: '#B26A00',
+    flexDirection: 'row',
+    gap: spacing.md,
+    padding: spacing.lg,
+    borderRadius: radius.lg,
     borderWidth: 1,
-    borderRadius: 8,
-    padding: 12,
-    gap: 4,
+    alignItems: 'flex-start',
   },
-  title: { fontWeight: '700', color: '#5C3700', fontSize: 15 },
-  body: { color: '#5C3700', fontSize: 13, lineHeight: 18 },
+  text: { flex: 1, gap: 2 },
 });

@@ -9,7 +9,7 @@ export interface FormValues {
   pulse: string;
   temperature: string;
   consciousness: Consciousness | null; // null until the user picks one: no silent default
-  on_supplemental_oxygen: boolean;
+  on_supplemental_oxygen: boolean | null; // null until air/oxygen is chosen (DESIGN.md §8.1)
 }
 
 export const EMPTY_FORM: FormValues = {
@@ -19,7 +19,7 @@ export const EMPTY_FORM: FormValues = {
   pulse: '',
   temperature: '',
   consciousness: null,
-  on_supplemental_oxygen: false,
+  on_supplemental_oxygen: null,
 };
 
 export type FieldErrors = Partial<Record<VitalsField, string>>;
@@ -28,7 +28,7 @@ export type BuildResult = { ok: true; request: VitalsRequest } | { ok: false; er
 
 /** Parses a numeric text input. Accepts a decimal comma ("36,8"), which many
  *  locales' keyboards produce. Returns an error string or the number. */
-function parseNumber(text: string): number | string {
+export function parseNumber(text: string): number | string {
   const trimmed = text.trim().replace(',', '.');
   if (trimmed === '') return 'Required';
   const n = Number(trimmed);
@@ -36,10 +36,10 @@ function parseNumber(text: string): number | string {
 }
 
 /**
- * Light client-side checks only: empty or non-numeric inputs and an unchosen
- * consciousness level. Ranges, whole numbers and the one-decimal temperature
- * rule are left to the server, which is the source of truth; its field
- * errors are shown next to the inputs in the same way.
+ * Light client-side checks only: empty or non-numeric inputs and unanswered
+ * choices. Ranges, whole numbers and the one-decimal temperature rule are
+ * left to the server, which is the source of truth; its field errors are
+ * shown next to the inputs in the same way.
  */
 export function buildRequest(values: FormValues): BuildResult {
   const errors: FieldErrors = {};
@@ -52,6 +52,7 @@ export function buildRequest(values: FormValues): BuildResult {
     else numbers[field] = parsed;
   }
   if (values.consciousness === null) errors.consciousness = 'Choose a level';
+  if (values.on_supplemental_oxygen === null) errors.on_supplemental_oxygen = 'Choose air or supplemental oxygen';
 
   const { respiration_rate, spo2, systolic_bp, pulse, temperature } = numbers;
   if (
@@ -61,7 +62,8 @@ export function buildRequest(values: FormValues): BuildResult {
     systolic_bp === undefined ||
     pulse === undefined ||
     temperature === undefined ||
-    values.consciousness === null
+    values.consciousness === null ||
+    values.on_supplemental_oxygen === null
   ) {
     return { ok: false, errors };
   }

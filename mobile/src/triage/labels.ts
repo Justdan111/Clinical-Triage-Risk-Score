@@ -52,55 +52,29 @@ export function formatDriverValue(parameter: string, value: number | string | bo
   return unit ? `${text} ${unit}` : text;
 }
 
+export type BandIconName = 'check' | 'flag' | 'triangle' | 'octagon';
+
+/** Words and icon for each band. Colours live in the theme tokens (src/theme/tokens.ts). */
 export interface BandInfo {
   label: string;
-  /** A glyph shown beside the label so colour is never the only signal. Ends in
-   *  U+FE0E (text presentation): without it iOS draws some glyphs, e.g. â¼, as
-   *  colour emoji that ignore the text colour (a red emoji on the red card). */
-  icon: string;
-  /** Spoken by screen readers instead of the glyph. */
+  /** SVG icon shown beside the label so colour is never the only signal. */
+  icon: BandIconName;
+  /** Spoken by screen readers instead of the icon. */
   iconDescription: string;
-  background: string;
-  foreground: string;
   /** RCP NEWS2 Chart 2 wording for the clinical risk. */
   rcpRisk: string;
 }
 
-// Colours follow the RCP chart's escalating order (calm -> amber -> orange -> red).
-// Every foreground/background pair has a contrast ratio of at least 4.5:1.
 export const BAND_INFO: Record<Band, BandInfo> = {
-  low: {
-    label: 'Low',
-    icon: '✓\uFE0E',
-    iconDescription: 'check mark',
-    background: '#1B5E20',
-    foreground: '#FFFFFF',
-    rcpRisk: 'Low clinical risk',
-  },
+  low: { label: 'Low', icon: 'check', iconDescription: 'check mark', rcpRisk: 'Low clinical risk' },
   red_flagged: {
     label: 'Red-flagged',
-    icon: '⚑\uFE0E',
+    icon: 'flag',
     iconDescription: 'flag',
-    background: '#FFD54F',
-    foreground: '#1A1A1A',
     rcpRisk: 'Low–medium clinical risk (red score)',
   },
-  medium: {
-    label: 'Medium',
-    icon: '▲\uFE0E',
-    iconDescription: 'warning triangle',
-    background: '#FB8C00',
-    foreground: '#1A1A1A',
-    rcpRisk: 'Medium clinical risk',
-  },
-  high: {
-    label: 'High',
-    icon: '‼\uFE0E',
-    iconDescription: 'double exclamation mark',
-    background: '#B71C1C',
-    foreground: '#FFFFFF',
-    rcpRisk: 'High clinical risk',
-  },
+  medium: { label: 'Medium', icon: 'triangle', iconDescription: 'warning triangle', rcpRisk: 'Medium clinical risk' },
+  high: { label: 'High', icon: 'octagon', iconDescription: 'alert octagon', rcpRisk: 'High clinical risk' },
 };
 
 export const RED_FLAG_EXPLANATION =

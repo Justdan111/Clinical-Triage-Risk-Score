@@ -1,72 +1,142 @@
 import { router } from 'expo-router';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AccessibilityInfo,
-  ActivityIndicator,
-  Pressable,
   ScrollView,
   StyleSheet,
-  Switch,
-  Text,
-  TextInput,
+  useWindowDimensions,
   View,
+  type ScrollViewInstance,
+  type TextInputInstance,
+  type ViewInstance,
 } from 'react-native';
+import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { scoreVitals } from '@/api/client';
-import { CONSCIOUSNESS_LEVELS, VITALS_FIELDS, type VitalsField } from '@/api/types';
+import { VITALS_FIELDS, type VitalsField } from '@/api/types';
+import { Card } from '@/components/card';
+import { ConsciousnessCard, OxygenCard } from '@/components/choice-cards';
 import { Disclaimer } from '@/components/disclaimer';
+import { VITAL_ICONS } from '@/components/vital-icons';
+import { ProgressRing } from '@/components/progress-ring';
+import { SubmitButton, type SubmitState } from '@/components/submit-button';
+import { VitalCard } from '@/components/vital-card';
 import { useKeyboardHeight } from '@/hooks/use-keyboard-height';
+import { haptics } from '@/motion/haptics';
 import { buildRequest, EMPTY_FORM, type FormValues, type NumericField } from '@/triage/form';
-import { CONSCIOUSNESS_LABELS, PARAMETER_INFO, parameterLabel } from '@/triage/labels';
+import { PARAMETER_INFO, parameterLabel } from '@/triage/labels';
+import {
+  FORM_FIELDS,
+  filledCount,
+  firstEmptyField,
+  isFieldFilled,
+  newlyFilled,
+  progressAnnouncement,
+  TOTAL_FIELDS,
+} from '@/triage/progress';
+import { Txt, useTheme } from '@/theme/theme';
+import { duration, radius, spacing } from '@/theme/tokens';
 
-const NUMERIC_INPUTS: { field: NumericField; placeholder: string; decimal: boolean }[] = [
-  { field: 'respiration_rate', placeholder: 'e.g. 16', decimal: false },
-  { field: 'spo2', placeholder: 'e.g. 97', decimal: false },
-  { field: 'systolic_bp', placeholder: 'e.g. 120', decimal: false },
-  { field: 'pulse', placeholder: 'e.g. 72', decimal: false },
-  { field: 'temperature', placeholder: 'e.g. 36.8', decimal: true },
+const NUMERIC_CARDS: { field: NumericField; decimal: boolean }[] = [
+  { field: 'respiration_rate', decimal: false },
+  { field: 'spo2', decimal: false },
+  { field: 'systolic_bp', decimal: false },
+  { field: 'pulse', decimal: false },
+  { field: 'temperature', decimal: true },
 ];
 
-// Banner text when the problems are shown next to the inputs.
-const FIX_FIELDS_MESSAGE = 'Some vitals need attention. See the highlighted fields.';
+const FIX_FIELDS_MESSAGE = 'Some vitals need attention. See the highlighted cards.';
 
 function isVitalsField(f: string): f is VitalsField {
   return (VITALS_FIELDS as readonly string[]).includes(f);
 }
 
-function announce(message: string) {
-  // Screen readers don't notice text that appears elsewhere on screen.
-  AccessibilityInfo.announceForAccessibility(message);
-}
-
 export default function VitalsFormScreen() {
+  const { colors } = useTheme();
+  const insets = useSafeAreaInsets();
+  const keyboardHeight = useKeyboardHeight();
+  // At large text sizes the title gets its own line under the ring, so words never break mid-word.
+  const { fontScale } = useWindowDimensions();
+  const stackHeader = fontScale >= 1.5;
+
   const [values, setValues] = useState<FormValues>(EMPTY_FORM);
-  // Keyed by API field name; holds both client-side and server-side messages.
   const [errors, setErrors] = useState<Partial<Record<VitalsField, string>>>({});
+  const [errorKey, setErrorKey] = useState(0);
   const [banner, setBanner] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // A ref, not state, guards against double-submit: two taps in the same frame
   // both see the old `submitting` state, but the ref changes synchronously.
   const inFlight = useRef(false);
 
-  const keyboardHeight = useKeyboardHeight();
-  const insets = useSafeAreaInsets();
+  const scrollRef = useRef<ScrollViewInstance>(null);
+  const inputRefs = useRef<Partial<Record<NumericField, TextInputInstance | null>>>({});
+  const consciousnessRef = useRef<ViewInstance>(null);
+  const oxygenRef = useRef<ViewInstance>(null);
+  // Card positions are relative to the cards container; add its offset in the scroll content.
+  const cardY = useRef<Partial<Record<VitalsField, number>>>({});
+  const cardsOffset = useRef(0);
+
+  const count = filledCount(values);
+  const submitState: SubmitState = submitting ? 'loading' : count === TOTAL_FIELDS ? 'ready' : 'incomplete';
+
+  // Cards dim and lock while a request is in flight.
+  const dim = useSharedValue(1);
+  useEffect(() => {
+    dim.value = withTiming(submitting ? 0.55 : 1, { duration: duration.base });
+  }, [submitting, dim]);
+  const dimStyle = useAnimatedStyle(() => ({ opacity: dim.value }));
 
   function update<K extends keyof FormValues>(field: K, value: FormValues[K]) {
-    setValues((v) => ({ ...v, [field]: value }));
+    const next = { ...values, [field]: value };
+    if (newlyFilled(values, next).length > 0) haptics.tick();
+    setValues(next);
     setErrors((e) => ({ ...e, [field]: undefined })); // editing a field clears its error
+  }
+
+  function scrollToField(field: VitalsField) {
+    const y = cardY.current[field];
+    if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(0, cardsOffset.current + y - spacing.lg), animated: true });
+  }
+
+  /** Brings the first card with an error into view, so its message is never hidden below the footer. */
+  function scrollToFirstError(errs: Partial<Record<VitalsField, string>>) {
+    const field = FORM_FIELDS.find((f) => errs[f]);
+    if (field) scrollToField(field);
+  }
+
+  function focusFirstEmpty() {
+    const field = firstEmptyField(values);
+    if (!field) return;
+    scrollToField(field);
+    if (field === 'consciousness' || field === 'on_supplemental_oxygen') {
+      const target = field === 'consciousness' ? consciousnessRef.current : oxygenRef.current;
+      if (target) AccessibilityInfo.sendAccessibilityEvent(target, 'focus');
+    } else {
+      inputRefs.current[field]?.focus();
+    }
   }
 
   async function submit() {
     if (inFlight.current) return;
-    setBanner(null);
 
+    if (count < TOTAL_FIELDS) {
+      // Dimmed button: guide, don't scold (DESIGN.md §8.4).
+      haptics.nudge();
+      AccessibilityInfo.announceForAccessibility(progressAnnouncement(count));
+      focusFirstEmpty();
+      return;
+    }
+
+    haptics.submit();
+    setBanner(null);
     const built = buildRequest(values);
     if (!built.ok) {
       setErrors(built.errors);
+      setErrorKey((k) => k + 1);
+      scrollToFirstError(built.errors);
       setBanner(FIX_FIELDS_MESSAGE);
-      announce(FIX_FIELDS_MESSAGE);
+      AccessibilityInfo.announceForAccessibility(FIX_FIELDS_MESSAGE);
       return;
     }
 
@@ -87,9 +157,12 @@ export default function VitalsFormScreen() {
             else unknown.push(`${parameterLabel(field)}: ${message}`);
           }
           setErrors(known);
+          setErrorKey((k) => k + 1);
+          scrollToFirstError(known);
           const text = [FIX_FIELDS_MESSAGE, ...unknown].join('\n');
           setBanner(text);
-          announce(text);
+          const spoken = Object.entries(known).map(([f, m]) => `${parameterLabel(f)}: ${m}`);
+          AccessibilityInfo.announceForAccessibility([FIX_FIELDS_MESSAGE, ...spoken, ...unknown].join('. '));
           return;
         }
         case 'network':
@@ -98,7 +171,7 @@ export default function VitalsFormScreen() {
         case 'unexpected':
         case 'config':
           setBanner(outcome.message);
-          announce(outcome.message);
+          AccessibilityInfo.announceForAccessibility(outcome.message);
           return;
       }
     } finally {
@@ -108,168 +181,114 @@ export default function VitalsFormScreen() {
     }
   }
 
+  function onCardLayout(field: VitalsField, y: number) {
+    cardY.current[field] = y;
+  }
+
   return (
-    <View style={styles.screen}>
+    <View style={[styles.screen, { backgroundColor: colors.bg }]}>
       <ScrollView
+        ref={scrollRef}
         style={styles.flex}
-        contentContainerStyle={styles.container}
+        contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="interactive"
         contentInsetAdjustmentBehavior="automatic"
       >
+        <Card elevation="e1" style={[styles.progressCard, stackHeader && styles.progressCardStacked]}>
+          <ProgressRing count={count} />
+          <View style={styles.progressText}>
+            <Txt variant="title">Patient vitals</Txt>
+            <Txt variant="body" color="textMuted">
+              {progressAnnouncement(count)}
+            </Txt>
+          </View>
+        </Card>
+
         <Disclaimer />
 
-        {NUMERIC_INPUTS.map(({ field, placeholder, decimal }) => {
-          const { label, unit } = PARAMETER_INFO[field];
-          const error = errors[field];
-          return (
-            <View key={field} style={styles.field}>
-              <Text style={styles.label} importantForAccessibility="no" accessibilityElementsHidden>
-                {label} <Text style={styles.unit}>({unit})</Text>
-              </Text>
-              <TextInput
-                style={[styles.input, error ? styles.inputError : null]}
-                value={values[field]}
-                onChangeText={(text) => update(field, text)}
-                placeholder={placeholder}
-                placeholderTextColor="#6B6B6B"
-                keyboardType={decimal ? 'decimal-pad' : 'number-pad'}
-                returnKeyType="done"
-                accessibilityLabel={`${label}, in ${unit}`}
-                accessibilityHint={error ? `Error: ${error}` : undefined}
-                editable={!submitting}
-              />
-              {error ? (
-                <Text style={styles.error} importantForAccessibility="no" accessibilityElementsHidden>
-                  {error}
-                </Text>
-              ) : null}
-            </View>
-          );
-        })}
-
-        <View style={styles.field}>
-          <Text style={styles.label} accessibilityRole="header">
-            {PARAMETER_INFO.consciousness.label} (ACVPU)
-          </Text>
-          <View style={styles.options} accessibilityRole="radiogroup" accessibilityLabel="Consciousness level">
-            {CONSCIOUSNESS_LEVELS.map((level) => {
-              const selected = values.consciousness === level;
-              return (
-                <Pressable
-                  key={level}
-                  onPress={() => update('consciousness', level)}
-                  disabled={submitting}
-                  accessibilityRole="radio"
-                  accessibilityLabel={CONSCIOUSNESS_LABELS[level]}
-                  accessibilityState={{ checked: selected, disabled: submitting }}
-                  style={[styles.option, selected && styles.optionSelected]}
-                >
-                  <Text style={[styles.optionText, selected && styles.optionTextSelected]}>
-                    {selected ? '● ' : '○ '}
-                    {CONSCIOUSNESS_LABELS[level]}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {errors.consciousness ? (
-            <Text style={styles.error} accessibilityLiveRegion="polite">
-              Consciousness: {errors.consciousness}
-            </Text>
-          ) : null}
-        </View>
-
-        <View style={[styles.field, styles.switchRow]}>
-          <Text style={[styles.label, styles.switchLabel]} importantForAccessibility="no" accessibilityElementsHidden>
-            {PARAMETER_INFO.on_supplemental_oxygen.label}
-          </Text>
-          <Switch
-            value={values.on_supplemental_oxygen}
-            onValueChange={(on) => update('on_supplemental_oxygen', on)}
+        <Animated.View
+          style={[styles.cards, dimStyle]}
+          pointerEvents={submitting ? 'none' : 'auto'}
+          onLayout={(e) => {
+            cardsOffset.current = e.nativeEvent.layout.y;
+          }}
+        >
+          {NUMERIC_CARDS.map(({ field, decimal }) => (
+            <VitalCard
+              key={field}
+              field={field}
+              icon={VITAL_ICONS[field]}
+              label={PARAMETER_INFO[field].label}
+              unit={PARAMETER_INFO[field].unit}
+              decimal={decimal}
+              value={values[field]}
+              onChange={(text) => update(field, text)}
+              error={errors[field]}
+              errorKey={errorKey}
+              filled={isFieldFilled(values, field)}
+              disabled={submitting}
+              inputRef={(r) => {
+                inputRefs.current[field] = r;
+              }}
+              onLayout={(e) => onCardLayout(field, e.nativeEvent.layout.y)}
+            />
+          ))}
+          <ConsciousnessCard
+            value={values.consciousness}
+            onChange={(c) => update('consciousness', c)}
+            error={errors.consciousness}
+            errorKey={errorKey}
             disabled={submitting}
-            accessibilityLabel="On supplemental oxygen"
-            accessibilityHint={errors.on_supplemental_oxygen ? `Error: ${errors.on_supplemental_oxygen}` : undefined}
+            focusRef={consciousnessRef}
+            onLayout={(e) => onCardLayout('consciousness', e.nativeEvent.layout.y)}
           />
-        </View>
-        {errors.on_supplemental_oxygen ? <Text style={styles.error}>{errors.on_supplemental_oxygen}</Text> : null}
+          <OxygenCard
+            value={values.on_supplemental_oxygen}
+            onChange={(on) => update('on_supplemental_oxygen', on)}
+            error={errors.on_supplemental_oxygen}
+            errorKey={errorKey}
+            disabled={submitting}
+            focusRef={oxygenRef}
+            onLayout={(e) => onCardLayout('on_supplemental_oxygen', e.nativeEvent.layout.y)}
+          />
+        </Animated.View>
       </ScrollView>
 
       {/* Outside the ScrollView and lifted by the keyboard's height, so the
-          submit button (and any error banner) is always on screen. */}
+          submit button (and any banner) is always on screen. */}
       <View
         style={[
           styles.footer,
-          { marginBottom: keyboardHeight, paddingBottom: keyboardHeight > 0 ? 12 : Math.max(insets.bottom, 12) },
+          {
+            backgroundColor: colors.bg,
+            borderTopColor: colors.border,
+            marginBottom: keyboardHeight,
+            paddingBottom: keyboardHeight > 0 ? spacing.md : Math.max(insets.bottom, spacing.md),
+          },
         ]}
       >
         {banner ? (
-          <View style={styles.banner} accessibilityLiveRegion="polite">
-            <Text style={styles.bannerText}>{banner}</Text>
+          <View style={[styles.banner, { backgroundColor: colors.errorSurface }]} accessibilityLiveRegion="polite">
+            <Txt variant="label" color="onErrorSurface">
+              {banner}
+            </Txt>
           </View>
         ) : null}
-        <Pressable
-          onPress={submit}
-          disabled={submitting}
-          accessibilityRole="button"
-          accessibilityLabel={submitting ? 'Calculating NEWS2 score' : 'Calculate NEWS2 score'}
-          accessibilityHint="Sends these vitals to the scoring server"
-          accessibilityState={{ disabled: submitting, busy: submitting }}
-          style={({ pressed }) => [styles.button, (pressed || submitting) && styles.buttonPressed]}
-        >
-          {submitting ? (
-            <View style={styles.buttonRow}>
-              <ActivityIndicator color="#FFFFFF" />
-              <Text style={styles.buttonText}>Calculating…</Text>
-            </View>
-          ) : (
-            <Text style={styles.buttonText}>Calculate NEWS2</Text>
-          )}
-        </Pressable>
+        <SubmitButton state={submitState} filled={count} onPress={submit} />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: { flex: 1, backgroundColor: '#FFFFFF' },
+  screen: { flex: 1 },
   flex: { flex: 1 },
-  container: { padding: 16, gap: 16, paddingBottom: 24 },
-  field: { gap: 6 },
-  label: { fontSize: 16, fontWeight: '600', color: '#1A1A1A' },
-  unit: { fontWeight: '400', color: '#555555' },
-  input: {
-    borderWidth: 1,
-    borderColor: '#767676',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    fontSize: 18,
-    color: '#1A1A1A',
-  },
-  inputError: { borderColor: '#B71C1C', borderWidth: 2 },
-  error: { color: '#B71C1C', fontSize: 14 },
-  options: { gap: 8 },
-  option: { borderWidth: 1, borderColor: '#767676', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 10, minHeight: 44, justifyContent: 'center' },
-  optionSelected: { borderColor: '#0D47A1', backgroundColor: '#E3F2FD', borderWidth: 2 },
-  optionText: { fontSize: 16, color: '#1A1A1A' },
-  optionTextSelected: { fontWeight: '600', color: '#0D47A1' },
-  // Wraps so that at large text sizes the label gets the full width (no
-  // mid-word breaks) and the switch moves onto the next line.
-  switchRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  switchLabel: { flexGrow: 1, flexShrink: 1 },
-  footer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    gap: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: '#CCCCCC',
-    backgroundColor: '#FFFFFF',
-  },
-  banner: { backgroundColor: '#FDECEA', borderColor: '#B71C1C', borderWidth: 1, borderRadius: 8, padding: 12 },
-  bannerText: { color: '#7F1010', fontSize: 15, lineHeight: 20 },
-  button: { backgroundColor: '#0D47A1', borderRadius: 8, paddingVertical: 14, alignItems: 'center', justifyContent: 'center', minHeight: 50 },
-  buttonPressed: { opacity: 0.75 },
-  buttonRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  buttonText: { color: '#FFFFFF', fontSize: 17, fontWeight: '700', textAlign: 'center' },
+  content: { padding: spacing.xl, gap: spacing.lg, paddingBottom: spacing['3xl'] },
+  progressCard: { flexDirection: 'row', alignItems: 'center', gap: spacing.lg, flexWrap: 'wrap' },
+  progressCardStacked: { flexDirection: 'column', alignItems: 'flex-start' },
+  progressText: { flexShrink: 1, gap: 2 },
+  cards: { gap: spacing.lg },
+  footer: { paddingHorizontal: spacing.xl, paddingTop: spacing.md, gap: spacing.sm, borderTopWidth: StyleSheet.hairlineWidth },
+  banner: { borderRadius: radius.md, padding: spacing.md },
 });
