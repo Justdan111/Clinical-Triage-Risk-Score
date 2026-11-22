@@ -19,7 +19,7 @@ import (
 const maxBodyBytes = 4 << 10
 
 // Machine-readable error codes. Clients should branch on these, not on the
-// human-readable "error" text, which may be reworded.
+// human-readable "error" text, which may be reworded.ß
 const (
 	CodeInvalidJSON          = "invalid_json"
 	CodeValidationFailed     = "validation_failed"
